@@ -1,20 +1,27 @@
-```python
-# Install first:
-# pip install groq
+# ============================================================
+# ROLE-BASED GROQ AI CHATBOT
+# Google Colab
+# ============================================================
 
+# 1. Install Groq
+!pip install -q groq
+
+
+# 2. Import
 from groq import Groq
 
+
 # ============================================================
-# GROQ CLIENT
+# 3. GROQ API KEY
 # ============================================================
 
-API_KEY = "YOUR_GROQ_API_KEY"
+API_KEY = "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"
 
 client = Groq(api_key=API_KEY)
 
 
 # ============================================================
-# ROLES
+# 4. AI ROLES
 # ============================================================
 
 roles = [
@@ -43,9 +50,9 @@ Be polite, professional and helpful.
 You are an AI teacher.
 
 Explain concepts in simple language.
-Give practical examples.
-Break difficult concepts into smaller steps.
-Ask questions when clarification is needed.
+Give examples.
+Explain difficult topics step-by-step.
+Keep explanations clear and easy to understand.
 """
     },
 
@@ -59,151 +66,199 @@ Help users:
 - Write Python code
 - Debug Python code
 - Explain Python concepts
-- Improve code
 - Solve programming problems
+- Improve existing code
 
-Provide clean, simple and understandable solutions.
+Provide clean, simple and efficient solutions.
 """
     }
 ]
 
 
 # ============================================================
-# DISPLAY ROLES
+# 5. DISPLAY ROLES
 # ============================================================
 
-def display_roles():
+print("\n==========================================")
+print("          ROLE-BASED AI CHATBOT")
+print("==========================================")
 
-    print("\n==============================")
-    print("       AI CHATBOT")
-    print("==============================")
+print("\nAvailable Roles:\n")
 
-    print("\nAvailable Roles:")
-
-    for role in roles:
-        print(f"{role['id']}. {role['name'].replace('_', ' ').title()}")
-
-
-# ============================================================
-# SELECT ROLE
-# ============================================================
-
-def select_role():
-
-    while True:
-
-        display_roles()
-
-        try:
-            role_choice = int(input("\nSelect Role (1-3): "))
-
-            if 1 <= role_choice <= len(roles):
-                selected_role = roles[role_choice - 1]
-
-                print(
-                    f"\nSelected Role: "
-                    f"{selected_role['name'].replace('_', ' ').title()}"
-                )
-
-                return selected_role
-
-            else:
-                print("\nInvalid choice. Please select 1, 2 or 3.")
-
-        except ValueError:
-            print("\nPlease enter a number.")
+for role in roles:
+    print(
+        f"{role['id']}. "
+        f"{role['name'].replace('_', ' ').title()}"
+    )
 
 
 # ============================================================
-# CHATBOT
+# 6. SELECT ROLE
 # ============================================================
 
-def chatbot(selected_role):
+while True:
 
-    # Conversation history
-    messages = [
-        {
-            "role": "system",
-            "content": selected_role["description"]
-        }
-    ]
+    try:
+        role_choice = int(input("\nSelect Role (1-3): "))
 
-    print("\n==============================")
-    print("        CHAT STARTED")
-    print("==============================")
-
-    print("\nType 'exit', 'quit' or 'bye' to stop.")
-
-    while True:
-
-        # Get user input
-        user_input = input("\nYou: ").strip()
-
-        # Check empty input
-        if not user_input:
-            print("Please enter something.")
-            continue
-
-        # Exit
-        if user_input.lower() in ["exit", "quit", "bye"]:
-            print("\nAI: Goodbye!")
+        if 1 <= role_choice <= len(roles):
             break
 
-        # Add user message to conversation
-        messages.append(
+        print("Please select 1, 2 or 3.")
+
+    except ValueError:
+        print("Please enter a number.")
+
+
+selected_role = roles[role_choice - 1]
+
+print(
+    "\nSelected Role:",
+    selected_role["name"].replace("_", " ").title()
+)
+
+
+# ============================================================
+# 7. CONVERSATION HISTORY
+# ============================================================
+
+conversation_history = [
+    {
+        "role": "system",
+        "content": selected_role["description"]
+    }
+]
+
+
+# ============================================================
+# 8. MODEL SETTINGS
+# ============================================================
+
+MODEL_NAME = "llama-3.3-70b-versatile"
+
+TEMPERATURE = 0.7
+
+MAX_TOKENS = 1024
+
+
+# ============================================================
+# 9. START CHAT
+# ============================================================
+
+print("\n==========================================")
+print("              CHAT STARTED")
+print("==========================================")
+
+print("\nType 'exit', 'quit' or 'q' to stop.")
+
+
+# ============================================================
+# 10. CHAT LOOP
+# ============================================================
+
+while True:
+
+    try:
+        user_input = input("\nYou: ")
+
+    except EOFError:
+        break
+
+
+    # Remove extra spaces
+    user_input = user_input.strip()
+
+
+    # Ignore empty input
+    if not user_input:
+        continue
+
+
+    # Exit commands
+    if user_input.lower() in ["exit", "quit", "q"]:
+
+        print("\nAI: Goodbye!")
+        break
+
+
+    # ========================================================
+    # ADD USER MESSAGE
+    # ========================================================
+
+    conversation_history.append(
+        {
+            "role": "user",
+            "content": user_input
+        }
+    )
+
+
+    # ========================================================
+    # CALL GROQ API
+    # ========================================================
+
+    print("\nAI: ", end="", flush=True)
+
+    try:
+
+        completion = client.chat.completions.create(
+
+            model=MODEL_NAME,
+
+            messages=conversation_history,
+
+            temperature=TEMPERATURE,
+
+            max_completion_tokens=MAX_TOKENS,
+
+            stream=True
+        )
+
+
+        # ====================================================
+        # STREAM AI RESPONSE
+        # ====================================================
+
+        full_response = ""
+
+        for chunk in completion:
+
+            delta = chunk.choices[0].delta.content or ""
+
+            print(delta, end="", flush=True)
+
+            full_response += delta
+
+
+        print()
+
+
+        # ====================================================
+        # SAVE AI RESPONSE
+        # ====================================================
+
+        conversation_history.append(
             {
-                "role": "user",
-                "content": user_input
+                "role": "assistant",
+                "content": full_response
             }
         )
 
-        try:
 
-            # Send conversation to Groq
-            response = client.chat.completions.create(
-                model="openai/gpt-oss-20b",
-                messages=messages,
-                temperature=0.5
-            )
+    # ========================================================
+    # ERROR HANDLING
+    # ========================================================
 
-            # Get AI response
-            answer = response.choices[0].message.content
+    except Exception as e:
 
-            # Display AI response
-            print("\nAI:", answer)
+        print(f"\n[ERROR]: {e}")
 
-            # Store AI response
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": answer
-                }
-            )
-
-        except Exception as error:
-
-            print("\nError occurred:")
-            print(error)
-
-            # Remove the user's message if API call failed
-            messages.pop()
+        # Remove failed user message
+        conversation_history.pop()
 
 
 # ============================================================
-# MAIN PROGRAM
+# END
 # ============================================================
 
-def main():
-
-    selected_role = select_role()
-
-    chatbot(selected_role)
-
-
-# ============================================================
-# START PROGRAM
-# ============================================================
-
-if __name__ == "__main__":
-    main()
-```
+print("\nChatbot closed.")
