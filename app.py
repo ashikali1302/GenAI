@@ -1,10 +1,4 @@
-# ============================================================
-#                 RAG AI CHATBOT
-#              STREAMLIT VERSION
-#
-#        GROQ + FAISS + TF-IDF + PDF
-# ============================================================
-
+```python
 import os
 import re
 import streamlit as st
@@ -17,7 +11,7 @@ from groq import Groq
 
 
 # ============================================================
-# 1. PAGE CONFIG
+# PAGE CONFIG
 # ============================================================
 
 st.set_page_config(
@@ -28,7 +22,7 @@ st.set_page_config(
 
 
 # ============================================================
-# 2. CUSTOM CSS
+# CUSTOM CSS
 # ============================================================
 
 st.markdown(
@@ -41,7 +35,7 @@ st.markdown(
 
     .title {
         text-align: center;
-        font-size: 38px;
+        font-size: 36px;
         font-weight: 700;
         margin-bottom: 5px;
     }
@@ -49,8 +43,11 @@ st.markdown(
     .subtitle {
         text-align: center;
         color: #666;
-        font-size: 17px;
         margin-bottom: 25px;
+    }
+
+    [data-testid="stChatMessage"] {
+        border-radius: 12px;
     }
 
     </style>
@@ -60,7 +57,7 @@ st.markdown(
 
 
 # ============================================================
-# 3. TITLE
+# TITLE
 # ============================================================
 
 st.markdown(
@@ -69,22 +66,30 @@ st.markdown(
 )
 
 st.markdown(
-    '<div class="subtitle">'
-    'Chat with your PDF using Groq AI'
-    '</div>',
+    '<div class="subtitle">Chat with your PDF using Groq AI</div>',
     unsafe_allow_html=True
 )
 
 
 # ============================================================
-# 4. HARDCODED GROQ API KEY
+# GROQ API KEY
+# ============================================================
+# Replace the value below with your NEW Groq API key.
+#
+# WARNING:
+# Hardcoding an API key is NOT secure for public repositories.
 # ============================================================
 
 GROQ_API_KEY = "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"
 
 
+if not GROQ_API_KEY or GROQ_API_KEY == "YOUR_NEW_GROQ_API_KEY":
+    st.error("Please add your Groq API key in app.py.")
+    st.stop()
+
+
 # ============================================================
-# 5. GROQ CLIENT
+# GROQ CLIENT
 # ============================================================
 
 client = Groq(
@@ -93,38 +98,34 @@ client = Groq(
 
 
 # ============================================================
-# 6. MODEL
+# MODEL
 # ============================================================
 
 MODEL_NAME = "llama-3.3-70b-versatile"
 
 
 # ============================================================
-# 7. SESSION STATE
+# SESSION STATE
 # ============================================================
 
 if "document_chunks" not in st.session_state:
     st.session_state.document_chunks = []
 
-
 if "vector_db" not in st.session_state:
     st.session_state.vector_db = None
-
 
 if "tfidf_vectorizer" not in st.session_state:
     st.session_state.tfidf_vectorizer = None
 
-
 if "document_name" not in st.session_state:
     st.session_state.document_name = ""
-
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 
 # ============================================================
-# 8. CLEAN TEXT
+# CLEAN TEXT
 # ============================================================
 
 def clean_text(text):
@@ -141,7 +142,7 @@ def clean_text(text):
 
 
 # ============================================================
-# 9. CREATE CHUNKS
+# CREATE TEXT CHUNKS
 # ============================================================
 
 def create_chunks(
@@ -161,6 +162,7 @@ def create_chunks(
         chunk = text[start:end]
 
         if chunk.strip():
+
             chunks.append(
                 chunk.strip()
             )
@@ -171,7 +173,7 @@ def create_chunks(
 
 
 # ============================================================
-# 10. EXTRACT PDF TEXT
+# EXTRACT PDF TEXT
 # ============================================================
 
 def extract_pdf_text(uploaded_file):
@@ -203,19 +205,15 @@ def extract_pdf_text(uploaded_file):
 
 
 # ============================================================
-# 11. CREATE FAISS VECTOR DATABASE
+# CREATE FAISS DATABASE
 # ============================================================
 
 def create_vector_database(chunks):
 
     vectorizer = TfidfVectorizer(
-
         stop_words="english",
-
         max_features=10000,
-
         ngram_range=(1, 2)
-
     )
 
     vectors = (
@@ -238,13 +236,15 @@ def create_vector_database(chunks):
         dimension
     )
 
-    index.add(vectors)
+    index.add(
+        vectors
+    )
 
     return index, vectorizer
 
 
 # ============================================================
-# 12. PROCESS PDF
+# PROCESS PDF
 # ============================================================
 
 def process_pdf(uploaded_file):
@@ -258,10 +258,8 @@ def process_pdf(uploaded_file):
         if not text:
 
             return False, (
-                "No readable text found "
-                "in this PDF."
+                "No readable text found in this PDF."
             )
-
 
         chunks = create_chunks(
             text
@@ -273,41 +271,29 @@ def process_pdf(uploaded_file):
                 "Could not create document chunks."
             )
 
-
         index, vectorizer = (
             create_vector_database(
                 chunks
             )
         )
 
+        st.session_state.document_chunks = chunks
 
-        st.session_state.document_chunks = (
-            chunks
-        )
+        st.session_state.vector_db = index
 
-        st.session_state.vector_db = (
-            index
-        )
-
-        st.session_state.tfidf_vectorizer = (
-            vectorizer
-        )
+        st.session_state.tfidf_vectorizer = vectorizer
 
         st.session_state.document_name = (
             uploaded_file.name
         )
 
-
-        # Reset chat for new document
         st.session_state.messages = []
-
 
         return True, (
             f"PDF processed successfully!\n\n"
             f"Document: {uploaded_file.name}\n\n"
-            f"Chunks created: {len(chunks)}"
+            f"Chunks: {len(chunks)}"
         )
-
 
     except Exception as e:
 
@@ -317,7 +303,7 @@ def process_pdf(uploaded_file):
 
 
 # ============================================================
-# 13. RETRIEVE RELEVANT CHUNKS
+# RETRIEVE RELEVANT CHUNKS
 # ============================================================
 
 def retrieve_chunks(
@@ -337,11 +323,8 @@ def retrieve_chunks(
         st.session_state.document_chunks
     )
 
-
     if vector_db is None:
-
         return []
-
 
     question_vector = (
         vectorizer
@@ -349,17 +332,14 @@ def retrieve_chunks(
         .toarray()
     )
 
-
     question_vector = (
         question_vector
         .astype("float32")
     )
 
-
     faiss.normalize_L2(
         question_vector
     )
-
 
     scores, indexes = (
         vector_db.search(
@@ -371,9 +351,7 @@ def retrieve_chunks(
         )
     )
 
-
     results = []
-
 
     for score, index in zip(
         scores[0],
@@ -382,22 +360,18 @@ def retrieve_chunks(
 
         if index >= 0:
 
-            results.append({
-
-                "text":
-                    chunks[index],
-
-                "score":
-                    float(score)
-
-            })
-
+            results.append(
+                {
+                    "text": chunks[index],
+                    "score": float(score)
+                }
+            )
 
     return results
 
 
 # ============================================================
-# 14. GENERATE ANSWER
+# GENERATE AI ANSWER
 # ============================================================
 
 def generate_answer(question):
@@ -406,7 +380,6 @@ def generate_answer(question):
         question,
         top_k=5
     )
-
 
     if not results:
 
@@ -428,11 +401,9 @@ def generate_answer(question):
     ):
 
         context += (
-
             f"\n\n"
             f"========== CONTEXT {i} ==========\n"
             f"{result['text']}"
-
         )
 
 
@@ -441,7 +412,6 @@ def generate_answer(question):
     # ========================================================
 
     system_prompt = """
-
 You are a professional RAG AI assistant.
 
 Answer questions using the uploaded
@@ -466,7 +436,6 @@ Rules:
 
 6. Mention page numbers when
    available.
-
 """
 
 
@@ -475,19 +444,16 @@ Rules:
     # ========================================================
 
     user_prompt = f"""
-
 DOCUMENT CONTEXT:
 
 {context}
-
 
 USER QUESTION:
 
 {question}
 
-
-Answer the question using the
-document context.
+Answer the question using only
+the document context.
 """
 
 
@@ -503,30 +469,24 @@ document context.
     ]
 
 
-    # Add previous conversation
+    # Previous conversation
     for message in st.session_state.messages:
 
-        messages.append({
-
-            "role":
-                message["role"],
-
-            "content":
-                message["content"]
-
-        })
+        messages.append(
+            {
+                "role": message["role"],
+                "content": message["content"]
+            }
+        )
 
 
     # Current question
-    messages.append({
-
-        "role":
-            "user",
-
-        "content":
-            user_prompt
-
-    })
+    messages.append(
+        {
+            "role": "user",
+            "content": user_prompt
+        }
+    )
 
 
     # ========================================================
@@ -540,18 +500,12 @@ document context.
             .chat
             .completions
             .create(
-
                 model=MODEL_NAME,
-
                 messages=messages,
-
                 temperature=0.3,
-
                 max_completion_tokens=1024
-
             )
         )
-
 
         answer = (
             response
@@ -559,7 +513,6 @@ document context.
             .message
             .content
         )
-
 
     except Exception as e:
 
@@ -572,42 +525,36 @@ document context.
     # SOURCES
     # ========================================================
 
-    answer += "\n\n---\n**Sources used:**\n"
+    if results:
 
-    for i, result in enumerate(
-        results[:3],
-        start=1
-    ):
+        answer += "\n\n---\n**Sources used:**\n"
 
-        answer += (
+        for i, result in enumerate(
+            results[:3],
+            start=1
+        ):
 
-            f"- Context {i} "
-            f"(similarity: "
-            f"{result['score']:.2f})\n"
-
-        )
-
+            answer += (
+                f"- Context {i} "
+                f"(similarity: "
+                f"{result['score']:.2f})\n"
+            )
 
     return answer
 
 
 # ============================================================
-# 15. SIDEBAR
+# SIDEBAR
 # ============================================================
 
 with st.sidebar:
 
     st.header("📄 Document")
 
-
     uploaded_file = st.file_uploader(
-
         "Upload your PDF",
-
         type=["pdf"]
-
     )
-
 
     if uploaded_file:
 
@@ -626,14 +573,17 @@ with st.sidebar:
                     )
                 )
 
-
             if success:
 
-                st.success(message)
+                st.success(
+                    message
+                )
 
             else:
 
-                st.error(message)
+                st.error(
+                    message
+                )
 
 
     # ========================================================
@@ -665,7 +615,6 @@ with st.sidebar:
 
     st.divider()
 
-
     if st.button(
         "🗑️ Clear Chat",
         use_container_width=True
@@ -677,7 +626,7 @@ with st.sidebar:
 
 
 # ============================================================
-# 16. MAIN CHAT
+# MAIN AREA
 # ============================================================
 
 if not st.session_state.document_chunks:
@@ -689,7 +638,7 @@ if not st.session_state.document_chunks:
 
 
 # ============================================================
-# 17. DISPLAY CHAT HISTORY
+# DISPLAY CHAT HISTORY
 # ============================================================
 
 for message in st.session_state.messages:
@@ -704,7 +653,7 @@ for message in st.session_state.messages:
 
 
 # ============================================================
-# 18. CHAT INPUT
+# CHAT INPUT
 # ============================================================
 
 question = st.chat_input(
@@ -715,47 +664,46 @@ question = st.chat_input(
 if question:
 
     # --------------------------------------------------------
-    # Check document
+    # Check PDF
     # --------------------------------------------------------
 
     if not st.session_state.document_chunks:
 
         st.warning(
-            "Please upload and process "
-            "a PDF first."
+            "Please upload and process a PDF first."
         )
 
         st.stop()
 
 
     # --------------------------------------------------------
-    # Display user message
+    # USER MESSAGE
     # --------------------------------------------------------
 
-    with st.chat_message("user"):
+    with st.chat_message(
+        "user"
+    ):
 
         st.markdown(
             question
         )
 
 
-    # Save user message
-    st.session_state.messages.append({
-
-        "role":
-            "user",
-
-        "content":
-            question
-
-    })
+    st.session_state.messages.append(
+        {
+            "role": "user",
+            "content": question
+        }
+    )
 
 
     # --------------------------------------------------------
-    # Generate response
+    # AI RESPONSE
     # --------------------------------------------------------
 
-    with st.chat_message("assistant"):
+    with st.chat_message(
+        "assistant"
+    ):
 
         with st.spinner(
             "Thinking..."
@@ -770,14 +718,14 @@ if question:
         )
 
 
-    # Save assistant message
-    st.session_state.messages.append({
+    # --------------------------------------------------------
+    # SAVE AI RESPONSE
+    # --------------------------------------------------------
 
-        "role":
-            "assistant",
-
-        "content":
-            answer
-
-    })
+    st.session_state.messages.append(
+        {
+            "role": "assistant",
+            "content": answer
+        }
+    )
 ```
