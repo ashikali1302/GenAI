@@ -1,0 +1,895 @@
+# ============================================================
+#          RAG AI CHATBOT FOR GOOGLE COLAB
+#       GROQ + FAISS + TF-IDF + PDF + GRADIO
+#
+#       Compatible with older Gradio versions
+#       NO PYTORCH
+#       NO SENTENCE TRANSFORMERS
+# ============================================================
+
+
+# ============================================================
+# 1. INSTALL REQUIRED LIBRARIES
+# ============================================================
+
+!pip install -q groq gradio pypdf faiss-cpu scikit-learn
+
+
+# ============================================================
+# 2. IMPORT LIBRARIES
+# ============================================================
+
+import os
+import re
+import numpy as np
+import gradio as gr
+
+from pypdf import PdfReader
+
+from sklearn.feature_extraction.text import TfidfVectorizer
+
+import faiss
+
+from groq import Groq
+
+
+# ============================================================
+# 3. GROQ API KEY
+# ============================================================
+
+print("=" * 60)
+print("              RAG AI CHATBOT")
+print("=" * 60)
+
+GROQ_API_KEY = "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"
+
+if not GROQ_API_KEY:
+    raise ValueError(
+        "Groq API Key is required."
+    )
+
+
+# ============================================================
+# 4. GROQ CLIENT
+# ============================================================
+
+client = Groq(
+    api_key=GROQ_API_KEY
+)
+
+
+# ============================================================
+# 5. MODEL
+# ============================================================
+
+MODEL_NAME = "llama-3.3-70b-versatile"
+
+
+# ============================================================
+# 6. GLOBAL VARIABLES
+# ============================================================
+
+document_chunks = []
+
+vector_db = None
+
+tfidf_vectorizer = None
+
+document_name = ""
+
+
+# ============================================================
+# 7. CLEAN TEXT
+# ============================================================
+
+def clean_text(text):
+
+    text = text.replace(
+        "\n",
+        " "
+    )
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text
+    )
+
+    return text.strip()
+
+
+# ============================================================
+# 8. CREATE TEXT CHUNKS
+# ============================================================
+
+def create_chunks(
+    text,
+    chunk_size=1000,
+    overlap=200
+):
+
+    chunks = []
+
+    start = 0
+
+    while start < len(text):
+
+        end = start + chunk_size
+
+        chunk = text[start:end]
+
+        if chunk.strip():
+
+            chunks.append(
+                chunk.strip()
+            )
+
+        start += (
+            chunk_size - overlap
+        )
+
+    return chunks
+
+
+# ============================================================
+# 9. READ PDF
+# ============================================================
+
+def extract_pdf_text(file_path):
+
+    reader = PdfReader(
+        file_path
+    )
+
+    complete_text = ""
+
+    for page_number, page in enumerate(
+        reader.pages,
+        start=1
+    ):
+
+        page_text = page.extract_text()
+
+        if page_text:
+
+            complete_text += (
+                f"\n[Page {page_number}]\n"
+            )
+
+            complete_text += page_text
+
+    return clean_text(
+        complete_text
+    )
+
+
+# ============================================================
+# 10. CREATE FAISS DATABASE
+# ============================================================
+
+def create_vector_database(
+    chunks
+):
+
+    global tfidf_vectorizer
+
+    print(
+        "\nCreating document vectors..."
+    )
+
+    tfidf_vectorizer = TfidfVectorizer(
+
+        stop_words="english",
+
+        max_features=10000,
+
+        ngram_range=(1, 2)
+
+    )
+
+
+    # Convert text into vectors
+    vectors = (
+        tfidf_vectorizer
+        .fit_transform(chunks)
+        .toarray()
+    )
+
+
+    vectors = vectors.astype(
+        "float32"
+    )
+
+
+    # Normalize
+    faiss.normalize_L2(
+        vectors
+    )
+
+
+    dimension = vectors.shape[1]
+
+
+    # FAISS similarity index
+    index = faiss.IndexFlatIP(
+        dimension
+    )
+
+
+    index.add(
+        vectors
+    )
+
+
+    print(
+        "FAISS database created."
+    )
+
+    return index
+
+
+# ============================================================
+# 11. PROCESS PDF
+# ============================================================
+
+def process_pdf(file):
+
+    global document_chunks
+    global vector_db
+    global document_name
+
+
+    if file is None:
+
+        return (
+            "❌ Please upload a PDF first."
+        )
+
+
+    try:
+
+        print(
+            "\nReading PDF..."
+        )
+
+
+        # Extract text
+        text = extract_pdf_text(
+            file
+        )
+
+
+        if not text:
+
+            return (
+                "❌ No readable text "
+                "found in this PDF."
+            )
+
+
+        # Create chunks
+        chunks = create_chunks(
+            text
+        )
+
+
+        if not chunks:
+
+            return (
+                "❌ Could not create "
+                "document chunks."
+            )
+
+
+        # Save chunks
+        document_chunks = chunks
+
+
+        # Save document name
+        document_name = os.path.basename(
+            file
+        )
+
+
+        # Create vector database
+        vector_db = create_vector_database(
+            document_chunks
+        )
+
+
+        return (
+            "✅ PDF processed successfully!\n\n"
+
+            "📄 Document: "
+            + document_name
+            + "\n\n"
+
+            "🧩 Chunks: "
+            + str(len(document_chunks))
+            + "\n\n"
+
+            "You can now ask questions "
+            "about your document."
+        )
+
+
+    except Exception as e:
+
+        return (
+            "❌ PDF processing error:\n\n"
+            + str(e)
+        )
+
+
+# ============================================================
+# 12. RETRIEVE RELEVANT CHUNKS
+# ============================================================
+
+def retrieve_chunks(
+    question,
+    top_k=5
+):
+
+    global vector_db
+    global tfidf_vectorizer
+    global document_chunks
+
+
+    if vector_db is None:
+
+        return []
+
+
+    # Convert question to vector
+    question_vector = (
+        tfidf_vectorizer
+        .transform([question])
+        .toarray()
+    )
+
+
+    question_vector = (
+        question_vector
+        .astype("float32")
+    )
+
+
+    # Normalize
+    faiss.normalize_L2(
+        question_vector
+    )
+
+
+    # Search
+    scores, indexes = (
+        vector_db.search(
+            question_vector,
+            min(
+                top_k,
+                len(document_chunks)
+            )
+        )
+    )
+
+
+    results = []
+
+
+    for score, index in zip(
+        scores[0],
+        indexes[0]
+    ):
+
+        if index >= 0:
+
+            results.append({
+
+                "text":
+                    document_chunks[index],
+
+                "score":
+                    float(score)
+
+            })
+
+
+    return results
+
+
+# ============================================================
+# 13. GENERATE AI ANSWER
+# ============================================================
+
+def generate_answer(
+    question,
+    history
+):
+
+    global vector_db
+
+
+    # Empty input
+    if not question.strip():
+
+        return (
+            "",
+            history
+        )
+
+
+    # No document
+    if vector_db is None:
+
+        answer = (
+            "Please upload and process "
+            "a PDF first."
+        )
+
+        history.append(
+            (
+                question,
+                answer
+            )
+        )
+
+        return (
+            "",
+            history
+        )
+
+
+    # ========================================================
+    # RETRIEVE CONTEXT
+    # ========================================================
+
+    results = retrieve_chunks(
+        question,
+        top_k=5
+    )
+
+
+    # ========================================================
+    # BUILD CONTEXT
+    # ========================================================
+
+    context = ""
+
+
+    for i, result in enumerate(
+        results,
+        start=1
+    ):
+
+        context += (
+
+            "\n\n"
+            "========== CONTEXT "
+            + str(i)
+            + " ==========\n"
+
+            + result["text"]
+
+        )
+
+
+    # ========================================================
+    # SYSTEM PROMPT
+    # ========================================================
+
+    system_prompt = """
+
+You are a professional RAG AI assistant.
+
+Answer questions using the provided
+document context.
+
+Rules:
+
+1. Use the document context as the
+   primary source.
+
+2. Do not invent information.
+
+3. If the answer cannot be found
+   in the document, say:
+
+   "The answer is not available
+   in the uploaded document."
+
+4. Give clear and concise answers.
+
+5. Use bullet points when useful.
+
+6. Mention page numbers when
+   available and relevant.
+
+"""
+
+
+    # ========================================================
+    # USER PROMPT
+    # ========================================================
+
+    user_prompt = (
+
+        "DOCUMENT CONTEXT:\n"
+
+        + context
+
+        + "\n\nUSER QUESTION:\n"
+
+        + question
+
+        + "\n\n"
+
+        + "Answer the question using "
+          "the document context."
+
+    )
+
+
+    # ========================================================
+    # GROQ MESSAGES
+    # ========================================================
+
+    messages = [
+
+        {
+            "role":
+                "system",
+
+            "content":
+                system_prompt
+        }
+
+    ]
+
+
+    # Add previous messages
+    for old_user, old_ai in history:
+
+        messages.append({
+
+            "role":
+                "user",
+
+            "content":
+                old_user
+
+        })
+
+        messages.append({
+
+            "role":
+                "assistant",
+
+            "content":
+                old_ai
+
+        })
+
+
+    # Add current question
+    messages.append({
+
+        "role":
+            "user",
+
+        "content":
+            user_prompt
+
+    })
+
+
+    # ========================================================
+    # GROQ API
+    # ========================================================
+
+    try:
+
+        response = (
+            client
+            .chat
+            .completions
+            .create(
+
+                model=
+                    MODEL_NAME,
+
+                messages=
+                    messages,
+
+                temperature=
+                    0.3,
+
+                max_completion_tokens=
+                    1024,
+
+                stream=
+                    False
+
+            )
+        )
+
+
+        answer = (
+            response
+            .choices[0]
+            .message
+            .content
+        )
+
+
+    except Exception as e:
+
+        answer = (
+            "❌ Groq API Error:\n\n"
+            + str(e)
+        )
+
+
+    # ========================================================
+    # SOURCES
+    # ========================================================
+
+    if results:
+
+        answer += (
+            "\n\n---\n"
+            "**Sources used:**\n"
+        )
+
+
+        for i, result in enumerate(
+            results[:3],
+            start=1
+        ):
+
+            answer += (
+
+                "- Context "
+                + str(i)
+
+                + " (similarity: "
+
+                + f"{result['score']:.2f}"
+
+                + ")\n"
+
+            )
+
+
+    # ========================================================
+    # SAVE CHAT
+    # ========================================================
+
+    history.append(
+        (
+            question,
+            answer
+        )
+    )
+
+
+    return (
+        "",
+        history
+    )
+
+
+# ============================================================
+# 14. CLEAR CHAT
+# ============================================================
+
+def clear_chat():
+
+    return []
+
+
+# ============================================================
+# 15. CSS
+# ============================================================
+
+custom_css = """
+
+body {
+    background-color: #f7f7f8;
+}
+
+.gradio-container {
+    max-width: 1100px !important;
+    margin: auto !important;
+}
+
+#title {
+    text-align: center;
+    font-size: 30px;
+    font-weight: 700;
+}
+
+#subtitle {
+    text-align: center;
+    color: #666;
+    margin-bottom: 20px;
+}
+
+#chatbot {
+    border-radius: 15px;
+}
+
+#message-box textarea {
+    font-size: 16px !important;
+}
+
+button {
+    border-radius: 10px !important;
+}
+
+"""
+
+
+# ============================================================
+# 16. CREATE GRADIO UI
+# ============================================================
+
+with gr.Blocks(
+    title="RAG AI Assistant",
+    css=custom_css
+) as app:
+
+
+    # ========================================================
+    # HEADER
+    # ========================================================
+
+    gr.Markdown(
+        "# RAG AI Assistant",
+        elem_id="title"
+    )
+
+    gr.Markdown(
+        "Chat with your PDF using Groq AI",
+        elem_id="subtitle"
+    )
+
+
+    # ========================================================
+    # PDF UPLOAD
+    # ========================================================
+
+    with gr.Row():
+
+        pdf_file = gr.File(
+            label="Upload PDF",
+            file_types=[".pdf"],
+            type="filepath",
+            scale=3
+        )
+
+        process_button = gr.Button(
+            "Process PDF",
+            variant="primary",
+            scale=1
+        )
+
+
+    # ========================================================
+    # STATUS
+    # ========================================================
+
+    status = gr.Textbox(
+        label="Document Status",
+        placeholder=
+            "Upload a PDF and click Process PDF",
+        interactive=False
+    )
+
+
+    # ========================================================
+    # CHATBOT
+    #
+    # IMPORTANT:
+    # No type="messages"
+    # This works with older Gradio.
+    # ========================================================
+
+    chatbot = gr.Chatbot(
+        label="AI Assistant",
+        height=550,
+        elem_id="chatbot"
+    )
+
+
+    # ========================================================
+    # MESSAGE INPUT
+    # ========================================================
+
+    with gr.Row():
+
+        message = gr.Textbox(
+            placeholder=
+                "Ask something about your document...",
+            show_label=False,
+            lines=1,
+            scale=8,
+            elem_id="message-box"
+        )
+
+        send_button = gr.Button(
+            "Send",
+            variant="primary",
+            scale=1
+        )
+
+
+    # ========================================================
+    # CLEAR
+    # ========================================================
+
+    clear_button = gr.Button(
+        "Clear Chat"
+    )
+
+
+    # ========================================================
+    # EVENTS
+    # ========================================================
+
+    # Process PDF
+    process_button.click(
+        fn=process_pdf,
+        inputs=pdf_file,
+        outputs=status
+    )
+
+
+    # Send button
+    send_button.click(
+        fn=generate_answer,
+        inputs=[
+            message,
+            chatbot
+        ],
+        outputs=[
+            message,
+            chatbot
+        ]
+    )
+
+
+    # Press Enter
+    message.submit(
+        fn=generate_answer,
+        inputs=[
+            message,
+            chatbot
+        ],
+        outputs=[
+            message,
+            chatbot
+        ]
+    )
+
+
+    # Clear
+    clear_button.click(
+        fn=clear_chat,
+        inputs=None,
+        outputs=chatbot
+    )
+
+
+# ============================================================
+# 17. START APPLICATION
+# ============================================================
+
+print("\n")
+print("=" * 60)
+print("        RAG AI CHATBOT STARTING...")
+print("=" * 60)
+print("\n")
+
+app.launch(
+    share=True,
+    debug=True
+)
