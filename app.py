@@ -727,4 +727,3 @@ if question:
             "content": answer
         }
     )
-```
