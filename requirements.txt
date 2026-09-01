@@ -1,0 +1,8 @@
+```text
+streamlit
+groq
+pypdf
+faiss-cpu
+scikit-learn
+numpy
+```
