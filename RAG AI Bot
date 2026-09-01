@@ -1,56 +1,91 @@
+```python
 # ============================================================
-#          RAG AI CHATBOT FOR GOOGLE COLAB
-#       GROQ + FAISS + TF-IDF + PDF + GRADIO
+#                 RAG AI CHATBOT
+#              STREAMLIT VERSION
 #
-#       Compatible with older Gradio versions
-#       NO PYTORCH
-#       NO SENTENCE TRANSFORMERS
-# ============================================================
-
-
-# ============================================================
-# 1. INSTALL REQUIRED LIBRARIES
-# ============================================================
-
-!pip install -q groq gradio pypdf faiss-cpu scikit-learn
-
-
-# ============================================================
-# 2. IMPORT LIBRARIES
+#        GROQ + FAISS + TF-IDF + PDF
 # ============================================================
 
 import os
 import re
+import streamlit as st
 import numpy as np
-import gradio as gr
-
-from pypdf import PdfReader
-
-from sklearn.feature_extraction.text import TfidfVectorizer
-
 import faiss
 
+from pypdf import PdfReader
+from sklearn.feature_extraction.text import TfidfVectorizer
 from groq import Groq
 
 
 # ============================================================
-# 3. GROQ API KEY
+# 1. PAGE CONFIG
 # ============================================================
 
-print("=" * 60)
-print("              RAG AI CHATBOT")
-print("=" * 60)
+st.set_page_config(
+    page_title="RAG AI Assistant",
+    page_icon="🤖",
+    layout="wide"
+)
+
+
+# ============================================================
+# 2. CUSTOM CSS
+# ============================================================
+
+st.markdown(
+    """
+    <style>
+
+    .main {
+        background-color: #f7f7f8;
+    }
+
+    .title {
+        text-align: center;
+        font-size: 38px;
+        font-weight: 700;
+        margin-bottom: 5px;
+    }
+
+    .subtitle {
+        text-align: center;
+        color: #666;
+        font-size: 17px;
+        margin-bottom: 25px;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+
+# ============================================================
+# 3. TITLE
+# ============================================================
+
+st.markdown(
+    '<div class="title">🤖 RAG AI Assistant</div>',
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    '<div class="subtitle">'
+    'Chat with your PDF using Groq AI'
+    '</div>',
+    unsafe_allow_html=True
+)
+
+
+# ============================================================
+# 4. HARDCODED GROQ API KEY
+# ============================================================
 
 GROQ_API_KEY = "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"
 
-if not GROQ_API_KEY:
-    raise ValueError(
-        "Groq API Key is required."
-    )
-
 
 # ============================================================
-# 4. GROQ CLIENT
+# 5. GROQ CLIENT
 # ============================================================
 
 client = Groq(
@@ -59,35 +94,43 @@ client = Groq(
 
 
 # ============================================================
-# 5. MODEL
+# 6. MODEL
 # ============================================================
 
 MODEL_NAME = "llama-3.3-70b-versatile"
 
 
 # ============================================================
-# 6. GLOBAL VARIABLES
+# 7. SESSION STATE
 # ============================================================
 
-document_chunks = []
+if "document_chunks" not in st.session_state:
+    st.session_state.document_chunks = []
 
-vector_db = None
 
-tfidf_vectorizer = None
+if "vector_db" not in st.session_state:
+    st.session_state.vector_db = None
 
-document_name = ""
+
+if "tfidf_vectorizer" not in st.session_state:
+    st.session_state.tfidf_vectorizer = None
+
+
+if "document_name" not in st.session_state:
+    st.session_state.document_name = ""
+
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
 
 # ============================================================
-# 7. CLEAN TEXT
+# 8. CLEAN TEXT
 # ============================================================
 
 def clean_text(text):
 
-    text = text.replace(
-        "\n",
-        " "
-    )
+    text = text.replace("\n", " ")
 
     text = re.sub(
         r"\s+",
@@ -99,7 +142,7 @@ def clean_text(text):
 
 
 # ============================================================
-# 8. CREATE TEXT CHUNKS
+# 9. CREATE CHUNKS
 # ============================================================
 
 def create_chunks(
@@ -119,26 +162,23 @@ def create_chunks(
         chunk = text[start:end]
 
         if chunk.strip():
-
             chunks.append(
                 chunk.strip()
             )
 
-        start += (
-            chunk_size - overlap
-        )
+        start += chunk_size - overlap
 
     return chunks
 
 
 # ============================================================
-# 9. READ PDF
+# 10. EXTRACT PDF TEXT
 # ============================================================
 
-def extract_pdf_text(file_path):
+def extract_pdf_text(uploaded_file):
 
     reader = PdfReader(
-        file_path
+        uploaded_file
     )
 
     complete_text = ""
@@ -164,20 +204,12 @@ def extract_pdf_text(file_path):
 
 
 # ============================================================
-# 10. CREATE FAISS DATABASE
+# 11. CREATE FAISS VECTOR DATABASE
 # ============================================================
 
-def create_vector_database(
-    chunks
-):
+def create_vector_database(chunks):
 
-    global tfidf_vectorizer
-
-    print(
-        "\nCreating document vectors..."
-    )
-
-    tfidf_vectorizer = TfidfVectorizer(
+    vectorizer = TfidfVectorizer(
 
         stop_words="english",
 
@@ -187,142 +219,106 @@ def create_vector_database(
 
     )
 
-
-    # Convert text into vectors
     vectors = (
-        tfidf_vectorizer
+        vectorizer
         .fit_transform(chunks)
         .toarray()
     )
-
 
     vectors = vectors.astype(
         "float32"
     )
 
-
-    # Normalize
     faiss.normalize_L2(
         vectors
     )
 
-
     dimension = vectors.shape[1]
 
-
-    # FAISS similarity index
     index = faiss.IndexFlatIP(
         dimension
     )
 
+    index.add(vectors)
 
-    index.add(
-        vectors
-    )
-
-
-    print(
-        "FAISS database created."
-    )
-
-    return index
+    return index, vectorizer
 
 
 # ============================================================
-# 11. PROCESS PDF
+# 12. PROCESS PDF
 # ============================================================
 
-def process_pdf(file):
-
-    global document_chunks
-    global vector_db
-    global document_name
-
-
-    if file is None:
-
-        return (
-            "❌ Please upload a PDF first."
-        )
-
+def process_pdf(uploaded_file):
 
     try:
 
-        print(
-            "\nReading PDF..."
-        )
-
-
-        # Extract text
         text = extract_pdf_text(
-            file
+            uploaded_file
         )
-
 
         if not text:
 
-            return (
-                "❌ No readable text "
-                "found in this PDF."
+            return False, (
+                "No readable text found "
+                "in this PDF."
             )
 
 
-        # Create chunks
         chunks = create_chunks(
             text
         )
 
-
         if not chunks:
 
-            return (
-                "❌ Could not create "
-                "document chunks."
+            return False, (
+                "Could not create document chunks."
             )
 
 
-        # Save chunks
-        document_chunks = chunks
-
-
-        # Save document name
-        document_name = os.path.basename(
-            file
+        index, vectorizer = (
+            create_vector_database(
+                chunks
+            )
         )
 
 
-        # Create vector database
-        vector_db = create_vector_database(
-            document_chunks
+        st.session_state.document_chunks = (
+            chunks
+        )
+
+        st.session_state.vector_db = (
+            index
+        )
+
+        st.session_state.tfidf_vectorizer = (
+            vectorizer
+        )
+
+        st.session_state.document_name = (
+            uploaded_file.name
         )
 
 
-        return (
-            "✅ PDF processed successfully!\n\n"
+        # Reset chat for new document
+        st.session_state.messages = []
 
-            "📄 Document: "
-            + document_name
-            + "\n\n"
 
-            "🧩 Chunks: "
-            + str(len(document_chunks))
-            + "\n\n"
-
-            "You can now ask questions "
-            "about your document."
+        return True, (
+            f"PDF processed successfully!\n\n"
+            f"Document: {uploaded_file.name}\n\n"
+            f"Chunks created: {len(chunks)}"
         )
 
 
     except Exception as e:
 
-        return (
-            "❌ PDF processing error:\n\n"
-            + str(e)
+        return False, (
+            f"PDF processing error:\n\n{str(e)}"
         )
 
 
 # ============================================================
-# 12. RETRIEVE RELEVANT CHUNKS
+# 13. RETRIEVE RELEVANT CHUNKS
 # ============================================================
 
 def retrieve_chunks(
@@ -330,9 +326,17 @@ def retrieve_chunks(
     top_k=5
 ):
 
-    global vector_db
-    global tfidf_vectorizer
-    global document_chunks
+    vector_db = (
+        st.session_state.vector_db
+    )
+
+    vectorizer = (
+        st.session_state.tfidf_vectorizer
+    )
+
+    chunks = (
+        st.session_state.document_chunks
+    )
 
 
     if vector_db is None:
@@ -340,9 +344,8 @@ def retrieve_chunks(
         return []
 
 
-    # Convert question to vector
     question_vector = (
-        tfidf_vectorizer
+        vectorizer
         .transform([question])
         .toarray()
     )
@@ -354,19 +357,17 @@ def retrieve_chunks(
     )
 
 
-    # Normalize
     faiss.normalize_L2(
         question_vector
     )
 
 
-    # Search
     scores, indexes = (
         vector_db.search(
             question_vector,
             min(
                 top_k,
-                len(document_chunks)
+                len(chunks)
             )
         )
     )
@@ -385,7 +386,7 @@ def retrieve_chunks(
             results.append({
 
                 "text":
-                    document_chunks[index],
+                    chunks[index],
 
                 "score":
                     float(score)
@@ -397,55 +398,23 @@ def retrieve_chunks(
 
 
 # ============================================================
-# 13. GENERATE AI ANSWER
+# 14. GENERATE ANSWER
 # ============================================================
 
-def generate_answer(
-    question,
-    history
-):
-
-    global vector_db
-
-
-    # Empty input
-    if not question.strip():
-
-        return (
-            "",
-            history
-        )
-
-
-    # No document
-    if vector_db is None:
-
-        answer = (
-            "Please upload and process "
-            "a PDF first."
-        )
-
-        history.append(
-            (
-                question,
-                answer
-            )
-        )
-
-        return (
-            "",
-            history
-        )
-
-
-    # ========================================================
-    # RETRIEVE CONTEXT
-    # ========================================================
+def generate_answer(question):
 
     results = retrieve_chunks(
         question,
         top_k=5
     )
+
+
+    if not results:
+
+        return (
+            "The answer is not available "
+            "in the uploaded document."
+        )
 
 
     # ========================================================
@@ -454,7 +423,6 @@ def generate_answer(
 
     context = ""
 
-
     for i, result in enumerate(
         results,
         start=1
@@ -462,12 +430,9 @@ def generate_answer(
 
         context += (
 
-            "\n\n"
-            "========== CONTEXT "
-            + str(i)
-            + " ==========\n"
-
-            + result["text"]
+            f"\n\n"
+            f"========== CONTEXT {i} ==========\n"
+            f"{result['text']}"
 
         )
 
@@ -480,12 +445,12 @@ def generate_answer(
 
 You are a professional RAG AI assistant.
 
-Answer questions using the provided
+Answer questions using the uploaded
 document context.
 
 Rules:
 
-1. Use the document context as the
+1. Use the document context as your
    primary source.
 
 2. Do not invent information.
@@ -501,7 +466,7 @@ Rules:
 5. Use bullet points when useful.
 
 6. Mention page numbers when
-   available and relevant.
+   available.
 
 """
 
@@ -510,22 +475,21 @@ Rules:
     # USER PROMPT
     # ========================================================
 
-    user_prompt = (
+    user_prompt = f"""
 
-        "DOCUMENT CONTEXT:\n"
+DOCUMENT CONTEXT:
 
-        + context
+{context}
 
-        + "\n\nUSER QUESTION:\n"
 
-        + question
+USER QUESTION:
 
-        + "\n\n"
+{question}
 
-        + "Answer the question using "
-          "the document context."
 
-    )
+Answer the question using the
+document context.
+"""
 
 
     # ========================================================
@@ -533,43 +497,28 @@ Rules:
     # ========================================================
 
     messages = [
-
         {
-            "role":
-                "system",
-
-            "content":
-                system_prompt
+            "role": "system",
+            "content": system_prompt
         }
-
     ]
 
 
-    # Add previous messages
-    for old_user, old_ai in history:
+    # Add previous conversation
+    for message in st.session_state.messages:
 
         messages.append({
 
             "role":
-                "user",
+                message["role"],
 
             "content":
-                old_user
-
-        })
-
-        messages.append({
-
-            "role":
-                "assistant",
-
-            "content":
-                old_ai
+                message["content"]
 
         })
 
 
-    # Add current question
+    # Current question
     messages.append({
 
         "role":
@@ -593,20 +542,13 @@ Rules:
             .completions
             .create(
 
-                model=
-                    MODEL_NAME,
+                model=MODEL_NAME,
 
-                messages=
-                    messages,
+                messages=messages,
 
-                temperature=
-                    0.3,
+                temperature=0.3,
 
-                max_completion_tokens=
-                    1024,
-
-                stream=
-                    False
+                max_completion_tokens=1024
 
             )
         )
@@ -623,8 +565,7 @@ Rules:
     except Exception as e:
 
         answer = (
-            "❌ Groq API Error:\n\n"
-            + str(e)
+            f"Groq API Error:\n\n{str(e)}"
         )
 
 
@@ -632,264 +573,212 @@ Rules:
     # SOURCES
     # ========================================================
 
-    if results:
+    answer += "\n\n---\n**Sources used:**\n"
+
+    for i, result in enumerate(
+        results[:3],
+        start=1
+    ):
 
         answer += (
-            "\n\n---\n"
-            "**Sources used:**\n"
+
+            f"- Context {i} "
+            f"(similarity: "
+            f"{result['score']:.2f})\n"
+
         )
 
 
-        for i, result in enumerate(
-            results[:3],
-            start=1
+    return answer
+
+
+# ============================================================
+# 15. SIDEBAR
+# ============================================================
+
+with st.sidebar:
+
+    st.header("📄 Document")
+
+
+    uploaded_file = st.file_uploader(
+
+        "Upload your PDF",
+
+        type=["pdf"]
+
+    )
+
+
+    if uploaded_file:
+
+        if st.button(
+            "Process PDF",
+            use_container_width=True
         ):
 
-            answer += (
+            with st.spinner(
+                "Processing PDF..."
+            ):
 
-                "- Context "
-                + str(i)
+                success, message = (
+                    process_pdf(
+                        uploaded_file
+                    )
+                )
 
-                + " (similarity: "
 
-                + f"{result['score']:.2f}"
+            if success:
 
-                + ")\n"
+                st.success(message)
 
+            else:
+
+                st.error(message)
+
+
+    # ========================================================
+    # DOCUMENT STATUS
+    # ========================================================
+
+    if st.session_state.document_name:
+
+        st.divider()
+
+        st.success(
+            "📄 "
+            + st.session_state.document_name
+        )
+
+        st.write(
+            "🧩 Chunks: "
+            + str(
+                len(
+                    st.session_state.document_chunks
+                )
+            )
+        )
+
+
+    # ========================================================
+    # CLEAR CHAT
+    # ========================================================
+
+    st.divider()
+
+
+    if st.button(
+        "🗑️ Clear Chat",
+        use_container_width=True
+    ):
+
+        st.session_state.messages = []
+
+        st.rerun()
+
+
+# ============================================================
+# 16. MAIN CHAT
+# ============================================================
+
+if not st.session_state.document_chunks:
+
+    st.info(
+        "👈 Upload a PDF from the sidebar "
+        "and click **Process PDF** to start."
+    )
+
+
+# ============================================================
+# 17. DISPLAY CHAT HISTORY
+# ============================================================
+
+for message in st.session_state.messages:
+
+    with st.chat_message(
+        message["role"]
+    ):
+
+        st.markdown(
+            message["content"]
+        )
+
+
+# ============================================================
+# 18. CHAT INPUT
+# ============================================================
+
+question = st.chat_input(
+    "Ask something about your document..."
+)
+
+
+if question:
+
+    # --------------------------------------------------------
+    # Check document
+    # --------------------------------------------------------
+
+    if not st.session_state.document_chunks:
+
+        st.warning(
+            "Please upload and process "
+            "a PDF first."
+        )
+
+        st.stop()
+
+
+    # --------------------------------------------------------
+    # Display user message
+    # --------------------------------------------------------
+
+    with st.chat_message("user"):
+
+        st.markdown(
+            question
+        )
+
+
+    # Save user message
+    st.session_state.messages.append({
+
+        "role":
+            "user",
+
+        "content":
+            question
+
+    })
+
+
+    # --------------------------------------------------------
+    # Generate response
+    # --------------------------------------------------------
+
+    with st.chat_message("assistant"):
+
+        with st.spinner(
+            "Thinking..."
+        ):
+
+            answer = generate_answer(
+                question
             )
 
-
-    # ========================================================
-    # SAVE CHAT
-    # ========================================================
-
-    history.append(
-        (
-            question,
+        st.markdown(
             answer
         )
-    )
 
 
-    return (
-        "",
-        history
-    )
+    # Save assistant message
+    st.session_state.messages.append({
 
+        "role":
+            "assistant",
 
-# ============================================================
-# 14. CLEAR CHAT
-# ============================================================
+        "content":
+            answer
 
-def clear_chat():
-
-    return []
-
-
-# ============================================================
-# 15. CSS
-# ============================================================
-
-custom_css = """
-
-body {
-    background-color: #f7f7f8;
-}
-
-.gradio-container {
-    max-width: 1100px !important;
-    margin: auto !important;
-}
-
-#title {
-    text-align: center;
-    font-size: 30px;
-    font-weight: 700;
-}
-
-#subtitle {
-    text-align: center;
-    color: #666;
-    margin-bottom: 20px;
-}
-
-#chatbot {
-    border-radius: 15px;
-}
-
-#message-box textarea {
-    font-size: 16px !important;
-}
-
-button {
-    border-radius: 10px !important;
-}
-
-"""
-
-
-# ============================================================
-# 16. CREATE GRADIO UI
-# ============================================================
-
-with gr.Blocks(
-    title="RAG AI Assistant",
-    css=custom_css
-) as app:
-
-
-    # ========================================================
-    # HEADER
-    # ========================================================
-
-    gr.Markdown(
-        "# RAG AI Assistant",
-        elem_id="title"
-    )
-
-    gr.Markdown(
-        "Chat with your PDF using Groq AI",
-        elem_id="subtitle"
-    )
-
-
-    # ========================================================
-    # PDF UPLOAD
-    # ========================================================
-
-    with gr.Row():
-
-        pdf_file = gr.File(
-            label="Upload PDF",
-            file_types=[".pdf"],
-            type="filepath",
-            scale=3
-        )
-
-        process_button = gr.Button(
-            "Process PDF",
-            variant="primary",
-            scale=1
-        )
-
-
-    # ========================================================
-    # STATUS
-    # ========================================================
-
-    status = gr.Textbox(
-        label="Document Status",
-        placeholder=
-            "Upload a PDF and click Process PDF",
-        interactive=False
-    )
-
-
-    # ========================================================
-    # CHATBOT
-    #
-    # IMPORTANT:
-    # No type="messages"
-    # This works with older Gradio.
-    # ========================================================
-
-    chatbot = gr.Chatbot(
-        label="AI Assistant",
-        height=550,
-        elem_id="chatbot"
-    )
-
-
-    # ========================================================
-    # MESSAGE INPUT
-    # ========================================================
-
-    with gr.Row():
-
-        message = gr.Textbox(
-            placeholder=
-                "Ask something about your document...",
-            show_label=False,
-            lines=1,
-            scale=8,
-            elem_id="message-box"
-        )
-
-        send_button = gr.Button(
-            "Send",
-            variant="primary",
-            scale=1
-        )
-
-
-    # ========================================================
-    # CLEAR
-    # ========================================================
-
-    clear_button = gr.Button(
-        "Clear Chat"
-    )
-
-
-    # ========================================================
-    # EVENTS
-    # ========================================================
-
-    # Process PDF
-    process_button.click(
-        fn=process_pdf,
-        inputs=pdf_file,
-        outputs=status
-    )
-
-
-    # Send button
-    send_button.click(
-        fn=generate_answer,
-        inputs=[
-            message,
-            chatbot
-        ],
-        outputs=[
-            message,
-            chatbot
-        ]
-    )
-
-
-    # Press Enter
-    message.submit(
-        fn=generate_answer,
-        inputs=[
-            message,
-            chatbot
-        ],
-        outputs=[
-            message,
-            chatbot
-        ]
-    )
-
-
-    # Clear
-    clear_button.click(
-        fn=clear_chat,
-        inputs=None,
-        outputs=chatbot
-    )
-
-
-# ============================================================
-# 17. START APPLICATION
-# ============================================================
-
-print("\n")
-print("=" * 60)
-print("        RAG AI CHATBOT STARTING...")
-print("=" * 60)
-print("\n")
-
-app.launch(
-    share=True,
-    debug=True
-)
+    })
+```
